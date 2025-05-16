@@ -233,6 +233,178 @@ class Carlotta(Cube):
             steps *= 2
         game.move(self, steps)
 
+class Roccia(Cube):
+    """
+    Roccia团子
+    """
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def boost(self, game):
+        """
+        如果是最后一个团子，额外走2步
+        :param game:
+        :return:
+        """
+        order = game.current_order
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if order and order[-1] == self:
+            logging.info(f"{self.name}是最后一个移动，触发技能")
+            step += 2
+        game.move(self, step)
+
+class Brant(Cube):
+    """
+    Brant团子
+    """
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def boost(self, game):
+        """
+        如果是第一个移动，额外走2步
+        :param game:
+        :return:
+        """
+        order = game.current_order
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if order and order[0] == self:
+            logging.info(f"{self.name}是第一个移动，触发技能")
+            step += 2
+        game.move(self, step)
+
+class Cantarella(Cube):
+    """
+    Cantarella团子
+    """
+    def __init__(self, name, pos=0):
+        super().__init__(name, pos)
+        self.has_triggered = False
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def sticky_move(self, game):
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if not self.has_triggered:
+            # 检查每步是否遇到团子
+            # TODO 最后一格不知道算不算，现在不算
+            for i in range(1, step):
+                pos = self.pos + i
+                if game.positions[pos]:
+                    logging.info(f"{self.name}在第{i}步遇到团子，触发技能")
+                    last = step -i
+                    # 移到该团子上面
+                    game.positions[self.pos].remove(self)
+                    self.pos = pos
+                    # 整体移动团子
+                    carried = game.positions[pos]
+                    for d in carried:
+                        game.positions[d.pos].remove(d)
+                        d.pos += last
+                        game.positions[d.pos].append(d)
+                    self.has_triggered = True
+                    return
+        # 如果没有触发技能，正常移动
+        game.move(self, step)
+
+class Zani(Cube):
+    """
+    Zani团子
+    """
+    def __init__(self, name, pos=0):
+        super().__init__(name, pos)
+        self.next_bonus = False
+        self.current_bonus = False
+
+    def roll_dice(self, game):
+        return random.choice([1, 3])
+
+    @skill_hook(SkillTiming.TURN_START)
+    def get_bonus(self,game):
+        """
+        如果是堆叠状态，40%概率下回合额外+2
+        :param game:
+        :return:
+        """
+        if self.next_bonus:
+            self.current_bonus = True
+            self.next_bonus = False
+        stack = game.positions[self.pos]
+        idx = stack.index(self)
+
+        if len(stack) > 1:
+            logging.info(f"{self.name}为堆叠状态，开始判定")
+            if random.random() < 0.4:
+                logging.info(f"{self.name}当前为堆叠状态，下回合获得额外2格机会")
+                self.next_bonus = True
+
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def move(self, game):
+        """
+        掷骰子只会掷出1或3，若本轮移动前处于堆叠状态，下轮40%概率额外+2（每轮生效）
+        :param game:
+        :return:
+        """
+
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if self.current_bonus:
+            logging.info(f"{self.name}获得额外2格奖励")
+            step += 2
+            self.next_bonus = False
+        game.move(self, step)
+
+class Cartethyia(Cube):
+    """
+    Cartethyia团子
+    """
+    def __init__(self, name, pos=0):
+        super().__init__(name, pos)
+        self.triggered = False
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def move(self, game):
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if self.triggered:
+            logging.info(f"{self.name}技能判定")
+            if random.random() < 0.6:
+                logging.info(f"{self.name}触发技能")
+                step += 2
+        game.move(self, step)
+
+    @skill_hook(SkillTiming.TURN_END)
+    def last_place(self, game):
+        """
+        若自身移动后仍为最后一名，每局仅触发一次，之后每轮有概率+2格
+        :param game:
+        :return:
+        """
+        if self.triggered:
+            return
+        pos_list = [cube.pos for cube in game.cubes]
+        pos_list.sort(reverse=False)
+        if self.pos == pos_list[0]:
+            logging.info(f"{self.name}为最后一名，触发技能")
+            self.triggered = True
+
+class Phoebe(Cube):
+    """
+    Phoebe团子
+    """
+
+    @skill_hook(SkillTiming.MY_TURN)
+    def lucky_boost(self, game):
+        step = self.roll_dice(game)
+        logging.info(f"{self.name}掷骰子{step}")
+        if random.random() < 0.5:
+            logging.info(f"{self.name}触发技能，额外前进2格")
+            step += 2
+        game.move(self, step)
+
+
+
 
 
 class GameEventDispatcher:
@@ -257,6 +429,7 @@ class GameField:
         self.positions = defaultdict(list)  # 每格对应的团子堆栈
         self.dispatcher = GameEventDispatcher(self)
         self._first = True  # 是否第一次初始化
+        self.current_order = []  # 当前行动顺序
         # 初始化团子位置
         if not given_order:
             random.shuffle(cube_list)
@@ -321,6 +494,7 @@ class GameField:
                 delayed = [d for d in order if isinstance(d, Changli) and d.wants_to_delay()]
                 order = [d for d in order if d not in delayed] + delayed
 
+            current_order = order
             for d in order:
                 if d.finished:
                     continue
